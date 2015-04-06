@@ -282,7 +282,7 @@ void sendConfig() {
 }
 
 void do_avr_init() {
-	if (avrstatus==5) return;
+	if (avrstatus>=5) return;
 	if (autoconfig==0) return;
 	static int prev_status = -1;
 	static long dt_ms;
