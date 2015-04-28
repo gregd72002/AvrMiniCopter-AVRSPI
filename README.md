@@ -30,9 +30,6 @@ Type:
    - 4: save flight log
 - all other types will be forwarded to the backend; see the backend documentation
 
-#### MESSAGES
-For full list of available message see https://github.com/rpicopter/AvrMiniCopter-WWW/blob/master/www/debug_help.txt
-
 #### UNIX SOCKET
 When connecting over UNIX SOCKET the client needs to send the required connection type as the first byte.
 This is:

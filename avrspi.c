@@ -610,7 +610,7 @@ int main(int argc, char **argv)
 		if (dt_ms>=MSG_PERIOD) {
 			spi_time_prev = time_now;
 			if (spi) for (i=msg_counter;i<MSG_RATE;i++) 
-					if (i==msg_counter && autoconfig && avrstatus!=5) spi_sendMsg(&status_msg);
+					if (i==msg_counter && autoconfig && avrstatus<5) spi_sendMsg(&status_msg);
 					else spi_sendMsg(&dummy_msg);
 			msg_counter = 0;
 		}
