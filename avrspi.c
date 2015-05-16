@@ -93,10 +93,6 @@ void catch_signal(int sig)
 	stop = 1;
 }
 
-void reset_baro() {
-	system("/usr/bin/killall avrbaro");
-}
-
 int udp_check_client(struct sockaddr_in *c) {
 	int i;
 	for (i=0;i<MAX_UDP_CLIENTS;i++)
@@ -153,7 +149,7 @@ void process_msg_l(struct local_msg *m) {
 			local_buf[local_buf_c++] = lm;
 			printf("%u %i\n",lm.t,lm.v);
 			break;
-		case 4: reset_baro(); flog_save(); break;
+		case 4: flog_save(); break;
 		default: printf("Unknown local message: %u\n",m->v);
 	}
 }
@@ -218,8 +214,17 @@ void process_socket_queue(int client) {
 	}
 }
 
+void reset_clients() {
+	unsigned char bufout[LOCAL_MSG_SIZE];
+	bufout[0] = 2; //reset msg
+	for (int k=0;k<MAX_UNIX_CLIENTS;k++) {
+		if (sock[k]!=0) 
+			send(sock[k], bufout, LOCAL_MSG_SIZE, MSG_NOSIGNAL );
+	}
+}
+
 void reset_avr() {
-	reset_baro();
+	reset_clients();
 	if (verbose) printf("Reset AVR\n");
 	linuxgpio_initpin(config.reset_gpio);
 	linuxgpio_highpulsepin(config.reset_gpio, 500);
@@ -494,7 +499,6 @@ int main(int argc, char **argv)
                                 t = recvfrom(usock, ubuf+ret, BUF_SIZE-ret, MSG_DONTWAIT, (struct sockaddr *)&tmpaddress, &addrlen);
                                 if (t>0) ret+=t;
                         } while (t>0);
-                      //  ret = recvfrom(usock, ubuf, BUF_SIZE, 0, (struct sockaddr *)&tmpaddress, &addrlen);
 			if (ret<=0) {
 				printf("UDP recvfrom error? %i\n",ret);
 			} else {
