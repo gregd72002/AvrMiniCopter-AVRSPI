@@ -66,6 +66,7 @@ char socket_path[256] = "/dev/avrspi";
 /* UNIX END */
 
 /* CONFIG */
+int initTimeout = 2000;
 int avrstatus = -1;
 int autoconfig = 1;
 struct timespec reset_time_prev;
@@ -241,7 +242,7 @@ void reset_avr() {
 			return;
 		}
 		clock_gettime(CLOCK_REALTIME, &reset_time_prev);
-		reset_timeout = 2000;
+		reset_timeout = initTimeout;
 	}
 }
 
@@ -310,7 +311,7 @@ void do_avr_init() {
 	switch(avrstatus) {
 		case -1: break;
 		case 0: reset_avr(); prev_status = -1; break; //AVR should boot into status 1 so 0 means something wrong
-		case 1: sendConfig(); prev_status = avrstatus = -1; reset_timeout=2000; break;
+		case 1: sendConfig(); prev_status = avrstatus = -1; reset_timeout=initTimeout; break;
 		case 2: break; //AVR should arm motors and set status to 3
 		case 3: break; //AVR is initializing MPU 
 		case 4: reset_timeout=20000; break; //AVR is calibration gyro
@@ -361,11 +362,12 @@ int main(int argc, char **argv)
 	verbose = 1;
 	background = 0;
 	echo = 0;
-	while ((option = getopt(argc, argv,"dep:fv:u:")) != -1) {
+	while ((option = getopt(argc, argv,"dep:fv:u:y:")) != -1) {
 		switch (option)  {
 			case 'd': background = 1; verbose=0; break;
 			case 'p': portno = atoi(optarg);  break;
 			case 'v': verbose = atoi(optarg);  break;
+			case 'y': initTimeout = atoi(optarg);  break;
 			case 'f': spi=0; break;
 			case 'e': echo=1; break;
 			case 'u': strcpy(socket_path,optarg); break;

@@ -88,6 +88,7 @@ int spi_writeBytes(uint8_t *data, unsigned int len) {
         tr[i].delay_usecs = delay;
         tr[i].bits_per_word = bits;
         tr[i].cs_change = 0;
+	tr[i].pad = 0;
     };
 
     ret = ioctl(fd, SPI_IOC_MESSAGE(len), &tr);
