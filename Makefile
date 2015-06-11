@@ -4,7 +4,7 @@ CXXFLAGS=$(CXX_OPTS)
 
 CC=cc
 CFLAGS=
-CC_OPTS=-lstdc++ -lm
+CC_OPTS=-lstdc++ -lm -lrt
 LDFLAGS=$(CC_OPTS)
 #LDFLAGS=-lpthread -pthread -lstdc++ -lsupc++ 
 #LD_OPTS=-lpthread -lrt -lstdc++
