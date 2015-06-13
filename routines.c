@@ -17,6 +17,10 @@ unsigned int unpacku16(unsigned char *buf)
 
 
 void mssleep(unsigned int ms) {
+	bcm2835_delay(ms);
+}
+
+void mssleep_(unsigned int ms) {
   struct timespec tim, tim2;
    tim.tv_sec = ms/1000;
    tim.tv_nsec = 1000000L * (ms % 1000);

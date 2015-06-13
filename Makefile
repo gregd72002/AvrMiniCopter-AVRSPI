@@ -4,14 +4,14 @@ CXXFLAGS=$(CXX_OPTS)
 
 CC=cc
 CFLAGS=
-CC_OPTS=-lstdc++ -lm
+CC_OPTS=-lstdc++ -lm -lbcm2835
 LDFLAGS=$(CC_OPTS)
 #LDFLAGS=-lpthread -pthread -lstdc++ -lsupc++ 
 #LD_OPTS=-lpthread -lrt -lstdc++
 
 INSTALL=install
 
-OBJ_AVRSPI=avrspi.o routines.o gpio.o spidev.o avrconfig.o mpu.o flightlog.o
+OBJ_AVRSPI=avrspi.o routines.o spidev.o avrconfig.o mpu.o flightlog.o
 OBJ_AVRSPI_CMD=avrspi_cmd.o routines.o
 
 %.o: %.c                                                                         

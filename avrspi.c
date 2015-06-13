@@ -9,7 +9,7 @@
 #include <sys/time.h>
 #include "routines.h"
 #include "spidev.h"
-#include "gpio.h"
+#include <bcm2835.h>
 #include <getopt.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -22,13 +22,19 @@
 #include "flightlog.h"
 #include "mpu.h"
 
+#define RESET_PIN RPI_GPIO_P1_22
+#define RESET_TIMEOUT 10000
+
 #define MAX_UNIX_CLIENTS 6
 #define MAX_UDP_CLIENTS 6
 
 
+
 //avrspi will keep SPI transfer active by sending MSG_RATE messages every MSG_PERIOD
-#define MSG_RATE 8 
+#define MSG_RATE 8
 #define MSG_PERIOD 50 //ms
+
+//alternative: every 25 - 5 msg
 
 int verbose;
 
@@ -36,6 +42,10 @@ int msg_counter = 0;
 
 struct local_msg local_buf[64]; 
 int local_buf_c=0;
+
+#define AVR_OBUF_SIZE 16
+struct avr_msg avr_obuf[AVR_OBUF_SIZE];
+int avr_obuf_c = 0;
 
 #define BUF_SIZE 64
 
@@ -65,9 +75,10 @@ unsigned short buf_c[MAX_UNIX_CLIENTS];
 char socket_path[256] = "/dev/avrspi";
 /* UNIX END */
 
+int rpistatus = 0;
 /* CONFIG */
-int initTimeout = 2000;
 int avrstatus = -1;
+int avr_spi_check = 0;
 int autoconfig = 1;
 struct timespec reset_time_prev;
 int reset_timeout = 0;
@@ -87,6 +98,7 @@ struct timespec spi_time_prev,spi_last_msg;
 struct timespec *dt;
 
 void reset_avr();
+void spi_add(uint8_t t, int16_t v);
 
 void catch_signal(int sig)
 {
@@ -140,17 +152,21 @@ void ping_back(struct local_msg *m, struct sockaddr_in *c) {
 }
 
 void process_msg_l(struct local_msg *m) {
+	struct local_msg lm;
 	switch (m->v) {
 		case 0: break;
 		case 1: autoconfig = 1; reset_avr(); break; 
 		case 2: autoconfig = 0; reset_avr(); break; 
 		case 3: //get number of SPI errors 
-			struct local_msg lm;
 			lm.c = 0; lm.t = 253; lm.v=spi_crc_err;
 			local_buf[local_buf_c++] = lm;
-			printf("%u %i\n",lm.t,lm.v);
+			//printf("%u %i\n",lm.t,lm.v);
 			break;
 		case 4: flog_save(); break;
+		case 5: 
+			lm.c = 0; lm.t = 254; lm.v=rpistatus;
+			local_buf[local_buf_c++] = lm;
+			break;
 		default: printf("Unknown local message: %u\n",m->v);
 	}
 }
@@ -165,7 +181,7 @@ void process_msg(struct local_msg *m) {
 		if (verbose) printf("Forwarding to AVR t: %u v: %i\n",m->t,m->v);
 		if (spi) {
 			local2avr(m,&am);
-			spi_sendMsg(&am);
+			spi_add(am.t,am.v);
 			flog_process_msg(&am);
 		}
 		clock_gettime(CLOCK_REALTIME, &spi_last_msg);	
@@ -227,11 +243,15 @@ void reset_clients() {
 void reset_avr() {
 	reset_clients();
 	if (verbose) printf("Reset AVR\n");
-	linuxgpio_initpin(config.reset_gpio);
-	linuxgpio_highpulsepin(config.reset_gpio, 500);
-	linuxgpio_close();
-	//mssleep(2000);
-	avrstatus=-1;
+
+	avrstatus = -1;
+	avr_spi_check = 0;
+	avr_obuf_c = 0;
+	bcm2835_gpio_write(RESET_PIN, LOW);
+	bcm2835_delay(500);
+	bcm2835_gpio_write(RESET_PIN, HIGH);
+	bcm2835_delay(1000);
+	spi_reset();
 	
 	if (autoconfig) {
 		int ret = config_open(&config,CFG_PATH);
@@ -242,54 +262,69 @@ void reset_avr() {
 			return;
 		}
 		clock_gettime(CLOCK_REALTIME, &reset_time_prev);
-		reset_timeout = initTimeout;
+		reset_timeout = RESET_TIMEOUT;
 	}
 }
 
 void sendConfig() {
 	if (verbose) printf("AVRSPI: Sending config\n");
-        spi_sendIntPacket(3,0); //initial mode
-        spi_sendIntPacket(2 ,log_mode); //log mode
+        spi_sendIntPacket_delay(3,0); //initial mode
+        spi_sendIntPacket_delay(2 ,log_mode); //log mode
 
         int gyro_orientation = inv_orientation_matrix_to_scalar(config.gyro_orient);
-        spi_sendIntPacket(4,gyro_orientation);
+        spi_sendIntPacket_delay(4,gyro_orientation);
 
-        spi_sendIntPacket(9,config.mpu_addr);
+        spi_sendIntPacket_delay(9,config.mpu_addr);
 
-        spi_sendIntPacket(17,config.throttle_min);
-        spi_sendIntPacket(18,config.throttle_inflight);
-        spi_sendIntPacket(19,config.throttle_midflight);
+        spi_sendIntPacket_delay(17,config.throttle_min);
+        spi_sendIntPacket_delay(18,config.throttle_inflight);
+        spi_sendIntPacket_delay(19,config.throttle_midflight);
 
 	uint8_t motor_order = 
 		(config.motor_pin[0]) |
 		(config.motor_pin[1] << 2) |
 		(config.motor_pin[2] << 4) |
 		(config.motor_pin[3] << 6); 
-	spi_sendIntPacket(5,motor_order);
+	spi_sendIntPacket_delay(5,motor_order);
 
-        spi_sendIntPacket(69,config.baro_f);
+        spi_sendIntPacket_delay(69,config.baro_f);
         //PIDS
         for (int i=0;i<3;i++)
                 for (int j=0;j<5;j++) {
-                        spi_sendIntPacket(100+i*10+j,config.r_pid[i][j]);
-                        spi_sendIntPacket(200+i*10+j,config.s_pid[i][j]);
+                        spi_sendIntPacket_delay(100+i*10+j,config.r_pid[i][j]);
+                        spi_sendIntPacket_delay(200+i*10+j,config.s_pid[i][j]);
                 }
 
         for (int i=0;i<5;i++) {
-                spi_sendIntPacket(70+i,config.accel_pid[i]);
-                spi_sendIntPacket(80+i,config.alt_pid[i]);
-                spi_sendIntPacket(90+i,config.vz_pid[i]);
+                spi_sendIntPacket_delay(70+i,config.accel_pid[i]);
+                spi_sendIntPacket_delay(80+i,config.alt_pid[i]);
+                spi_sendIntPacket_delay(90+i,config.vz_pid[i]);
         }
 
-        spi_sendIntPacket(130,config.a_pid[0]);
+        spi_sendIntPacket_delay(130,config.a_pid[0]);
 
-        spi_sendIntPacket(255,2);
 	if (verbose) printf("AVRSPI: Config sent.\n");
+}
+
+void avr_spi_err_check(int v) {
+	static int val = 0;
+
+	if (avrstatus>=5) return;
+
+	if (avr_spi_check==0) {
+		val = v;
+	} else if (avr_spi_check==1) {
+		if (val!=v) //number of crc err increased
+			rpistatus = 2;
+		else 
+			spi_sendIntPacket_delay(255,2);
+	}
+
+	avr_spi_check++;
 }
 
 void do_avr_init() {
 	if (avrstatus>=5) return;
-	if (autoconfig==0) return;
 	static int prev_status = -1;
 	static long dt_ms;
 	struct timespec *dt;
@@ -311,7 +346,7 @@ void do_avr_init() {
 	switch(avrstatus) {
 		case -1: break;
 		case 0: reset_avr(); prev_status = -1; break; //AVR should boot into status 1 so 0 means something wrong
-		case 1: sendConfig(); prev_status = avrstatus = -1; reset_timeout=initTimeout; break;
+		case 1: spi_sendIntPacket_delay(255,1); sendConfig(); spi_sendIntPacket_delay(255,1); prev_status = avrstatus = -1; reset_timeout=RESET_TIMEOUT; break;
 		case 2: break; //AVR should arm motors and set status to 3
 		case 3: break; //AVR is initializing MPU 
 		case 4: reset_timeout=20000; break; //AVR is calibration gyro
@@ -325,7 +360,10 @@ void process_avr_msg(struct avr_msg *m) { //will be called for every received ms
 	flog_process_avrmsg(m);
 
 	switch (m->t) {
-		case 255: avrstatus = m->v; break;
+		case 255: avrstatus = m->v; break; //status
+		case 254: 
+			if (avrstatus<5) avr_spi_err_check(m->v);
+			break; //crc errors
 	}
 }
 
@@ -336,6 +374,21 @@ void print_usage() {
 	printf("-v [level] verbose level\n");
 	printf("-p [port] port to listen on (defaults to %i)\n",portno);
 	printf("-u [SOCKET] socket to listen on (defaults to %s)\n",socket_path);
+}
+
+void spi_add(uint8_t t, int16_t v) {
+	static bool overflow = false;
+	if (avr_obuf_c>=AVR_OBUF_SIZE) {
+		printf("AVR obuf overflow!\n");
+		overflow = true; 
+		rpistatus = 1;
+	}
+
+	if (!overflow) {
+		avr_obuf[avr_obuf_c].t = t;
+		avr_obuf[avr_obuf_c].v = v;
+		avr_obuf_c++;
+	}
 }
 
 int main(int argc, char **argv)
@@ -351,6 +404,15 @@ int main(int argc, char **argv)
 	struct avr_msg status_msg = {t: 255, v: 0};
 	long dt_ms = 0;
 
+
+	if (!bcm2835_init())
+        	return -1;
+
+	bcm2835_gpio_fsel(RESET_PIN, BCM2835_GPIO_FSEL_OUTP);
+	bcm2835_gpio_set_pud(RESET_PIN, BCM2835_GPIO_PUD_OFF);
+	bcm2835_gpio_write(RESET_PIN, HIGH);
+
+
 	clock_gettime(CLOCK_REALTIME, &time_now);
 
 	clock_gettime(CLOCK_REALTIME, &spi_time_prev);
@@ -362,12 +424,11 @@ int main(int argc, char **argv)
 	verbose = 1;
 	background = 0;
 	echo = 0;
-	while ((option = getopt(argc, argv,"dep:fv:u:y:")) != -1) {
+	while ((option = getopt(argc, argv,"dep:fv:u:")) != -1) {
 		switch (option)  {
 			case 'd': background = 1; verbose=0; break;
 			case 'p': portno = atoi(optarg);  break;
 			case 'v': verbose = atoi(optarg);  break;
-			case 'y': initTimeout = atoi(optarg);  break;
 			case 'f': spi=0; break;
 			case 'e': echo=1; break;
 			case 'u': strcpy(socket_path,optarg); break;
@@ -607,23 +668,34 @@ int main(int argc, char **argv)
 
 		local_buf_c = 0;
 
-		do_avr_init(); 
+		if (autoconfig)
+			do_avr_init(); 
+
 		flog_loop();
 
-		//ping avr if needed
-		dt = TimeSpecDiff(&time_now,&spi_time_prev);
-		dt_ms = dt->tv_sec*1000 + dt->tv_nsec/1000000;
-		if (dt_ms>=MSG_PERIOD) {
-			spi_time_prev = time_now;
-			if (spi) for (i=msg_counter;i<MSG_RATE;i++) 
-					if (i==msg_counter && autoconfig && avrstatus<5) spi_sendMsg(&status_msg);
-					else spi_sendMsg(&dummy_msg);
-			msg_counter = 0;
+		//send any packets to avr
+
+		j = avr_obuf_c;
+		for (i=0;i<j;i++) { 
+			if (i<MSG_RATE) {
+				spi_sendIntPacket(avr_obuf[i].t,avr_obuf[i].v);
+				avr_obuf_c--;
+			}
+			else avr_obuf[i-MSG_RATE] = avr_obuf[i];
 		}
 
+		for (j=i;j<MSG_RATE;j++) {
+			if (j==i && autoconfig && avrstatus>0 && avrstatus<5) spi_sendMsg(&status_msg); 
+			else spi_sendMsg(&dummy_msg);
+		}
+/*
+		for (j=0;j<2;j++) {
+			spi_sendMsg(&dummy_msg);
+		}
+*/			
 	}
 
-	if (echo) spi_close();
+	if (spi) spi_close();
 
 	bufout[0] = 1; //disconnect msg
 	for (int k=0;k<MAX_UNIX_CLIENTS;k++) {
@@ -644,6 +716,8 @@ int main(int argc, char **argv)
 
 
 	close(usock);
+
+	bcm2835_close();
 
 }
 

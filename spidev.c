@@ -17,35 +17,27 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
+//#include <sys/ioctl.h>
 #include <linux/types.h>
-#include <linux/spi/spidev.h>
+//#include <linux/spi/spidev.h>
+#include <bcm2835.h>
 #include "spidev.h"
 #include "crc8.h"
 #include "routines.h"
 #include <string.h>
 
-static const char *device = "/dev/spidev0.0";
-static uint8_t mode = 0;
-static uint8_t bits = 8;
-static uint32_t speed = 2000000;
-static uint32_t mspeed = 2000000;
-//static uint16_t delay = 25;
-static uint16_t delay = 100; //without delay RPi reads corrupted data
-//static uint16_t delay = 0;
+static bool t_start = false;
+static uint8_t buf[4];
+static int p = 0;
 
 static int ret;
-static int fd;
-
 
 struct avr_msg spi_buf[SPI_BUF_SIZE]; //reader buf
 int spi_buf_c = 0;
 
 int spi_crc_err = 0;
 
-void _spi_addByte(uint8_t b) {
-    static uint8_t buf[4];
-    static int p = 0;
+int _spi_addByte(uint8_t b) {
 
     buf[p++] = b;
 
@@ -62,55 +54,64 @@ void _spi_addByte(uint8_t b) {
 	    spi_buf[spi_buf_c].v = v;
 	    spi_buf_c++;
 	    p = 0;
+	    if (verbose) printf("Received msg %i %i\n",buf[0],v);
         } else {
 		spi_crc_err++;
-		//printf("Received CRC failed %i msg %i %i %i\n",spi_crc_err,buf[0],v,buf[3]);
+		if (verbose) printf("Received CRC failed msg %i %i %i %i\n",buf[0],buf[1],buf[2],buf[3]);
 		buf[0]=buf[1];
 		buf[1]=buf[2];
 		buf[2]=buf[3];
 		p--;
 	}
+	return 1;
     }
+    return 0;
 }
 
 int spi_writeBytes(uint8_t *data, unsigned int len) {
-    static int np =0;
-    uint8_t dummy[4];
+/*
+    uint8_t v[16];
+
     data[len] = CRC8((unsigned char*)(data),len);
     len++;
-    struct spi_ioc_transfer tr[len];
-    for (unsigned int i=0;i<len;i++) {
-        tr[i].tx_buf = (unsigned long)(data+i);
-        //tr[i].rx_buf = (unsigned long)(buf.b+i);
-        tr[i].rx_buf = (unsigned long)(dummy+i);
-        tr[i].len = sizeof(*(data+i));
-        tr[i].speed_hz = speed;
-        tr[i].delay_usecs = delay;
-        tr[i].bits_per_word = bits;
-        tr[i].cs_change = 0;
-	tr[i].pad = 0;
-    };
 
-    ret = ioctl(fd, SPI_IOC_MESSAGE(len), &tr);
-    if (ret<0) {
-        perror("Error transmitting spi data \n");
-    }
+    bcm2835_spi_transfernb((char*)data,(char*)v,len);
 
     for (unsigned int i=0;i<len;i++) {
-        if (!np && dummy[i]!=0) np++;
-        else if (np) np++;
-        if (np) _spi_addByte(dummy[i]);
-        if (np==4) np = 0;
+	if (!t_start && v[i]!=0) t_start=true; //looking for the first non-zero byte which indicates start of a packet
+	
+	if (t_start) //we have found begining of a transfer
+		if (_spi_addByte(v[i])) t_start = false;
+	//we have consumed the packet hence we will be waiting for a new start byte 
     }
+*/
 
-    mssleep(5); //without delay AVR reads corrupted messages
-    //usleep(5000); //without it AVR reads corrupted messages
+    uint8_t v;
+    
+    data[len] = CRC8((unsigned char*)(data),len);
+    len++;
 
+    for (unsigned int i=0;i<len;i++) {
+	v = bcm2835_spi_transfer(data[i]);
+
+	if (!t_start && v!=0) t_start=true; //looking for the first non-zero byte which indicates start of a packet
+	
+	if (t_start) //we have found begining of a transfer
+		if (_spi_addByte(v)) t_start = false;
+	//we have consumed the packet hence we will be waiting for a new start byte 
+	bcm2835_delay(1);
+    }
     return ret;
 }
 
 void spi_sendMsg(struct avr_msg *m) {
     spi_sendIntPacket(m->t,m->v);
+    bcm2835_delay(2); 
+}
+
+void spi_sendIntPacket_delay(uint8_t t, int16_t v) {
+	spi_sendIntPacket(t,v);
+	bcm2835_delay(5); //should be bigger than the AVR controller loop 
 }
 
 void spi_sendIntPacket(uint8_t t, int16_t v) {
@@ -122,45 +123,25 @@ void spi_sendIntPacket(uint8_t t, int16_t v) {
     spi_writeBytes(b,3);
 }
 
+void spi_reset() {
+	t_start = false;
+	p = 0;
+	spi_buf_c = 0;
+}
+
 int spi_close() {
-    return close(fd);
+    bcm2835_spi_end();
+    return 0;
 }
 
 int spi_init() {
-    spi_buf_c = 0;
-
-    fd = open(device, O_RDWR);
-    if (fd < 0)
-        return -1;
-
-    /*
-     * spi mode
-     */
-    ret = ioctl(fd, SPI_IOC_WR_MODE, &mode);
-    if (ret == -1)
-        return -2;
-    ret = ioctl(fd, SPI_IOC_RD_MODE, &mode);
-    if (ret == -1)
-        return -20;
-
-    /*
-     * bits per word
-     */
-    ret = ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
-    if (ret == -1)
-        return -3;
-    ret = ioctl(fd, SPI_IOC_RD_BITS_PER_WORD, &bits);
-    if (ret == -1)
-        return -30;
-    /*
-     * max speed hz
-     */
-    ret = ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &mspeed);
-    if (ret == -1)
-        return -4;
-    ret = ioctl(fd, SPI_IOC_RD_MAX_SPEED_HZ, &mspeed);
-    if (ret == -1)
-        return -4;
+    bcm2835_spi_begin();
+    bcm2835_spi_setBitOrder(BCM2835_SPI_BIT_ORDER_MSBFIRST);      // The default
+    bcm2835_spi_setDataMode(BCM2835_SPI_MODE0);                   // The default
+    //bcm2835_spi_setClockDivider(BCM2835_SPI_CLOCK_DIVIDER_65536); // The default
+    bcm2835_spi_setClockDivider(BCM2835_SPI_CLOCK_DIVIDER_256); // The default
+    bcm2835_spi_chipSelect(BCM2835_SPI_CS0);                      // The default
+    bcm2835_spi_setChipSelectPolarity(BCM2835_SPI_CS0, LOW);      // the default
 
     return 0;
 }

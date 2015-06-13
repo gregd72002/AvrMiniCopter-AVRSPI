@@ -161,27 +161,27 @@ void flog_loop() {
 
 	if (flight_time - prev_ts < 50) return; //but our log resolution will be 50ms
 	prev_ts = flight_time;
-
+	
 	switch(log_mode) {
 		case 0: return; break;
 		case 1: 
 			log_accel(); 
-			if (verbose==2) log_accel_print();
+			if (verbose==3) log_accel_print();
 			break;
 		case 2: 
 			log_gyro(); 
-			if (verbose==2) log_gyro_print();
+			if (verbose==3) log_gyro_print();
 			break;
 		case 3: 
 			log_quat(); 
-			if (verbose==2) log_quat_print();
+			if (verbose==3) log_quat_print();
 			break;
 		case 4:
 			log_altitude();
-			if (verbose==2) log_altitude_print();
+			if (verbose==3) log_altitude_print();
 			break;
 		case 100:
-			if (verbose==2) log100_print();
+			if (verbose==3) log100_print();
 			break;
 		default: break;
 	}
