@@ -31,8 +31,8 @@
 
 
 //avrspi will keep SPI transfer active by sending MSG_RATE messages every MSG_PERIOD
-#define MSG_RATE 8
-#define MSG_PERIOD 50 //ms
+#define MSG_RATE 5 
+#define MSG_PERIOD 25 //ms
 
 //alternative: every 25 - 5 msg
 
@@ -178,7 +178,6 @@ void process_msg(struct local_msg *m) {
 
 	if (m->t == 0) process_msg_l(m);
 	else {
-		if (verbose) printf("Forwarding to AVR t: %u v: %i\n",m->t,m->v);
 		if (spi) {
 			local2avr(m,&am);
 			spi_add(am.t,am.v);
@@ -244,6 +243,7 @@ void reset_avr() {
 	reset_clients();
 	if (verbose) printf("Reset AVR\n");
 
+	rpistatus = 0;
 	avrstatus = -1;
 	avr_spi_check = 0;
 	avr_obuf_c = 0;
@@ -377,14 +377,16 @@ void print_usage() {
 }
 
 void spi_add(uint8_t t, int16_t v) {
-	static bool overflow = false;
+	if (avrstatus<1) return;
+	if (autoconfig && avrstatus<5) return; //dont send anything to AVR if it is not booted and initialized yet
+
 	if (avr_obuf_c>=AVR_OBUF_SIZE) {
 		printf("AVR obuf overflow!\n");
-		overflow = true; 
-		rpistatus = 1;
+		if (autoconfig) rpistatus = 1; //dont change rpistatus in maintainance mode
+		return;
 	}
 
-	if (!overflow) {
+	if (rpistatus == 0) {
 		avr_obuf[avr_obuf_c].t = t;
 		avr_obuf[avr_obuf_c].v = v;
 		avr_obuf_c++;
@@ -659,7 +661,7 @@ int main(int argc, char **argv)
 				if (uclients[k]>0) { 
 					ret = sendto(usock,bufout,LOCAL_MSG_SIZE,0,(struct sockaddr *)&uaddress[k],addrlen);
 					if (ret<0) {
-						printf("Error sending datagram packet\n");
+						perror("Error sending datagram packet\n");
 						uclients[k] = 0;
 					}
 				}
@@ -674,10 +676,10 @@ int main(int argc, char **argv)
 		flog_loop();
 
 		//send any packets to avr
-
 		j = avr_obuf_c;
 		for (i=0;i<j;i++) { 
 			if (i<MSG_RATE) {
+				if (verbose) printf("Forwarding to AVR t: %u v: %i\n",avr_obuf[i].t,avr_obuf[i].v);
 				spi_sendIntPacket(avr_obuf[i].t,avr_obuf[i].v);
 				avr_obuf_c--;
 			}
