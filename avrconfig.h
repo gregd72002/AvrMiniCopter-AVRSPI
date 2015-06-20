@@ -5,7 +5,7 @@
 
 struct s_config {
     char path[128];
-    int throttle_min, throttle_inflight, throttle_midflight;
+    int throttle_standby, throttle_min, throttle_inflight, throttle_midflight;
     int s_pid[3][5]; //y,p,r + [max,imax,kp,ki,kd]
     int r_pid[3][5];
     int a_pid[1]; //acro_p

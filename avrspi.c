@@ -276,9 +276,10 @@ void sendConfig() {
 
         spi_sendIntPacket_delay(9,config.mpu_addr);
 
-        spi_sendIntPacket_delay(17,config.throttle_min);
-        spi_sendIntPacket_delay(18,config.throttle_inflight);
+        spi_sendIntPacket_delay(17,config.throttle_standby);
+        spi_sendIntPacket_delay(18,config.throttle_min);
         spi_sendIntPacket_delay(19,config.throttle_midflight);
+        spi_sendIntPacket_delay(22,config.throttle_inflight);
 
 	uint8_t motor_order = 
 		(config.motor_pin[0]) |

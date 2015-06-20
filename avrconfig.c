@@ -11,7 +11,7 @@ int config_open(struct s_config *config, const char *path) {
 
     if (state ==0) {
 
-    	if (fscanf(f,"%i\t%i\t%i\n",&config->throttle_min,&config->throttle_inflight,&config->throttle_midflight)!=3) state = 1;
+    	if (fscanf(f,"%i\t%i\t%i\t%i\n",&config->throttle_standby,&config->throttle_min,&config->throttle_inflight,&config->throttle_midflight)!=4) state = 1;
 
         for (int i=0;i<3 && !state;i++) {
             for (int j=0;j<5 && !state;j++)
