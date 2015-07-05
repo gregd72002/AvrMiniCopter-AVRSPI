@@ -54,7 +54,7 @@ int _spi_addByte(uint8_t b) {
 	    spi_buf[spi_buf_c].v = v;
 	    spi_buf_c++;
 	    p = 0;
-	    if (verbose) printf("Received msg %i %i\n",buf[0],v);
+	    if (verbose>1) printf("Received from AVR msg %i %i\n",buf[0],v);
         } else {
 		spi_crc_err++;
 		if (verbose) printf("Received CRC failed msg %i %i %i %i\n",buf[0],buf[1],buf[2],buf[3]);
@@ -120,6 +120,7 @@ void spi_sendIntPacket(uint8_t t, int16_t v) {
     b[0] = t;
     memcpy(b+1,vptr,2);
 
+    if (verbose>1) printf("Sending to AVR msg %u %i\n",t,v);
     spi_writeBytes(b,3);
 }
 

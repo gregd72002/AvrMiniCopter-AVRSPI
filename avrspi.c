@@ -239,6 +239,12 @@ void reset_clients() {
 	}
 }
 
+void set_reset_timeout(int ms) { //evaluated in avr init function
+	reset_time_prev = time_now;
+	reset_timeout = ms;	
+}
+
+
 void reset_avr() {
 	reset_clients();
 	if (verbose) printf("Reset AVR\n");
@@ -262,7 +268,7 @@ void reset_avr() {
 			return;
 		}
 		clock_gettime(CLOCK_REALTIME, &reset_time_prev);
-		reset_timeout = RESET_TIMEOUT;
+		set_reset_timeout(RESET_TIMEOUT);
 	}
 }
 
@@ -307,10 +313,8 @@ void sendConfig() {
 	if (verbose) printf("AVRSPI: Config sent.\n");
 }
 
-void avr_spi_err_check(int v) {
+void avr_spi_err_check(int v) { //called when initializing AVR to check if spi error occured during initialization. If all is fine it will request AVR to set status to 2
 	static int val = 0;
-
-	if (avrstatus>=5) return;
 
 	if (avr_spi_check==0) {
 		val = v;
@@ -325,7 +329,7 @@ void avr_spi_err_check(int v) {
 }
 
 void do_avr_init() {
-	if (avrstatus>=5) return;
+	if (avrstatus>=5) return; //dont do any init if avrstatus  5 (otherwise avr will be rebooted and status will be earased - very useful for failsafe and crash debugging) 
 	static int prev_status = -1;
 	static long dt_ms;
 	struct timespec *dt;
@@ -333,6 +337,7 @@ void do_avr_init() {
 	dt = TimeSpecDiff(&time_now,&reset_time_prev);
 	dt_ms = dt->tv_sec*1000 + dt->tv_nsec/1000000;
 	if (dt_ms>reset_timeout) { //we exceeded timeout waiting for a status change
+		if (verbose) printf("Init time exceeded. \n");
 		reset_avr();
 		prev_status = -1;
 		return;
@@ -340,17 +345,16 @@ void do_avr_init() {
 
 	if (prev_status == avrstatus) return;
 	prev_status = avrstatus;
-	reset_time_prev = time_now;
 
 	if (verbose) printf("AVR status: %i\n",avrstatus);
 
 	switch(avrstatus) {
 		case -1: break;
 		case 0: reset_avr(); prev_status = -1; break; //AVR should boot into status 1 so 0 means something wrong
-		case 1: spi_sendIntPacket_delay(255,1); sendConfig(); spi_sendIntPacket_delay(255,1); prev_status = avrstatus = -1; reset_timeout=RESET_TIMEOUT; break;
+		case 1: set_reset_timeout(RESET_TIMEOUT); spi_sendIntPacket_delay(255,1); sendConfig(); spi_sendIntPacket_delay(255,1); prev_status = avrstatus = -1; break;
 		case 2: break; //AVR should arm motors and set status to 3
 		case 3: break; //AVR is initializing MPU 
-		case 4: reset_timeout=20000; break; //AVR is calibration gyro
+		case 4: set_reset_timeout(RESET_TIMEOUT); break; //AVR is calibration gyro
 		case 5: if (verbose) printf("Initialization OK.\n"); break;
 		case 255: printf("AVRCONFIG: Gyro calibration failed!\n"); reset_avr(); break; //calibration failed
 		default: printf("AVRCONFIG: Unknown AVR status %i\n",avrstatus); break;
@@ -379,7 +383,7 @@ void print_usage() {
 
 void spi_add(uint8_t t, int16_t v) {
 	if (avrstatus<1) return;
-	if (autoconfig && avrstatus<5) return; //dont send anything to AVR if it is not booted and initialized yet
+	if (autoconfig && avrstatus<2) return; //dont send anything to AVR if it is not booted and initialized yet
 
 	if (avr_obuf_c>=AVR_OBUF_SIZE) {
 		printf("AVR obuf overflow!\n");
@@ -387,11 +391,13 @@ void spi_add(uint8_t t, int16_t v) {
 		return;
 	}
 
-	if (rpistatus == 0) {
+	if (rpistatus && t>=10 && t<=13) return; //dont feed any yprt if buffer overflow error (we need to feed at least altitude for failsafe to work!). This will cause failsafe to activate itself
+
+//	if (rpistatus == 0) { //send to AVR only if not overflow
 		avr_obuf[avr_obuf_c].t = t;
 		avr_obuf[avr_obuf_c].v = v;
 		avr_obuf_c++;
-	}
+//	}
 }
 
 int main(int argc, char **argv)
@@ -561,7 +567,7 @@ int main(int argc, char **argv)
 		if (!stop && FD_ISSET(usock, &readfds)) {
                         ret = 0;
                         int t = 0;
-                        do {
+                        do { //always try to receive all pending messages to prevent buffer buildup
                                 t = recvfrom(usock, ubuf+ret, BUF_SIZE-ret, MSG_DONTWAIT, (struct sockaddr *)&tmpaddress, &addrlen);
                                 if (t>0) ret+=t;
                         } while (t>0);
@@ -688,7 +694,7 @@ int main(int argc, char **argv)
 		}
 
 		for (j=i;j<MSG_RATE;j++) {
-			if (j==i && autoconfig && avrstatus>0 && avrstatus<5) spi_sendMsg(&status_msg); 
+			if (j==i && autoconfig && avrstatus>0 && avrstatus<5) spi_sendMsg(&status_msg); //query avr status for initialization purposes; 
 			else spi_sendMsg(&dummy_msg);
 		}
 /*
