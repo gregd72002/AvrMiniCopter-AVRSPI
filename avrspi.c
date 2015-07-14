@@ -18,8 +18,10 @@
 
 #include <stdio.h>
 
+#include "avrlog.h"
 #include "avrconfig.h"
 #include "flightlog.h"
+#include "avrlog.h"
 #include "mpu.h"
 
 #define RESET_PIN RPI_GPIO_P1_22
@@ -38,16 +40,15 @@
 
 int verbose;
 
-int msg_counter = 0;
-
 struct local_msg local_buf[64]; 
 int local_buf_c=0;
 
-#define AVR_OBUF_SIZE 16
+#define AVR_OBUF_SIZE MSG_RATE * 2 //in case we have multiple writers (controllers) 
 struct avr_msg avr_obuf[AVR_OBUF_SIZE];
 int avr_obuf_c = 0;
 
-#define BUF_SIZE 64
+#define BUF_SIZE LOCAL_MSG_SIZE * MSG_RATE //input buffer should not exceed our capacity to send
+int socket_rbuf_size = BUF_SIZE * 20; //inet socket receiving buffer size (500ms of data). Based on MSG_RATE
 
 int portno = 1030;
 
@@ -78,6 +79,7 @@ char socket_path[256] = "/dev/avrspi";
 int rpistatus = 0;
 /* CONFIG */
 int avrstatus = -1;
+int avrcode = -1;
 int avr_spi_check = 0;
 int autoconfig = 1;
 struct timespec reset_time_prev;
@@ -183,8 +185,6 @@ void process_msg(struct local_msg *m) {
 			spi_add(am.t,am.v);
 			flog_process_msg(&am);
 		}
-		clock_gettime(CLOCK_REALTIME, &spi_last_msg);	
-		msg_counter++;
 	}
 }
 
@@ -356,16 +356,25 @@ void do_avr_init() {
 		case 3: break; //AVR is initializing MPU 
 		case 4: set_reset_timeout(RESET_TIMEOUT); break; //AVR is calibration gyro
 		case 5: if (verbose) printf("Initialization OK.\n"); break;
-		case 255: printf("AVRCONFIG: Gyro calibration failed!\n"); reset_avr(); break; //calibration failed
 		default: printf("AVRCONFIG: Unknown AVR status %i\n",avrstatus); break;
 	}
 }
 
 void process_avr_msg(struct avr_msg *m) { //will be called for every received msg from AVR
 	flog_process_avrmsg(m);
+	uint8_t s;
+	int8_t c;
 
 	switch (m->t) {
-		case 255: avrstatus = m->v; break; //status
+		case 255: 
+			s = (m->v & 0xFF00) >> 8;
+			c = m->v & 0xFF;
+			if ((avrstatus != s) || (avrcode !=c)) {
+				avrlogbuflen = sprintf(avrlogbuf,"%li: %u %i",time_now.tv_sec,s,c);
+				avrlog_write(avrlogbuf,avrlogbuflen);
+			}
+			avrstatus = s; avrcode = c; 
+			break; //status
 		case 254: 
 			if (avrstatus<5) avr_spi_err_check(m->v);
 			break; //crc errors
@@ -386,6 +395,8 @@ void spi_add(uint8_t t, int16_t v) {
 	if (autoconfig && avrstatus<2) return; //dont send anything to AVR if it is not booted and initialized yet
 
 	if (avr_obuf_c>=AVR_OBUF_SIZE) {
+		avrlogbuflen = sprintf(avrlogbuf,"%li: SPI output buffer overflow!",time_now.tv_sec);
+		avrlog_write(avrlogbuf,avrlogbuflen);
 		printf("AVR obuf overflow!\n");
 		if (autoconfig) rpistatus = 1; //dont change rpistatus in maintainance mode
 		return;
@@ -410,8 +421,9 @@ int main(int argc, char **argv)
 	int i,j,ret;
 	unsigned char bufout[BUF_SIZE];
 	struct avr_msg dummy_msg = {t: 255, v: 254};
-	struct avr_msg status_msg = {t: 255, v: 0};
 	long dt_ms = 0;
+
+	nice(-2);
 
 
 	if (!bcm2835_init())
@@ -482,6 +494,12 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
+
+	if (setsockopt(usock, SOL_SOCKET, SO_RCVBUF, &socket_rbuf_size, sizeof(socket_rbuf_size)) == -1) {
+		perror("setting socket buffer");
+		exit(1);
+	}
+
 	printf("Socket created on port %i\n", portno);
 
 
@@ -496,6 +514,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
+	avrlog_init();
 
 	flog_init(CFG_PATH);
 	log_mode = flog_getmode();
@@ -522,9 +541,8 @@ int main(int argc, char **argv)
 		}
 	}
 
-	reset_avr();
 
-	clock_gettime(CLOCK_REALTIME, &spi_last_msg);
+	reset_avr();
 
 	if (verbose) printf("Starting main loop\n");
 
@@ -568,6 +586,7 @@ int main(int argc, char **argv)
                         ret = 0;
                         int t = 0;
                         do { //always try to receive all pending messages to prevent buffer buildup
+				//recvfrom always returns a single message hence while loop
                                 t = recvfrom(usock, ubuf+ret, BUF_SIZE-ret, MSG_DONTWAIT, (struct sockaddr *)&tmpaddress, &addrlen);
                                 if (t>0) ret+=t;
                         } while (t>0);
@@ -694,8 +713,7 @@ int main(int argc, char **argv)
 		}
 
 		for (j=i;j<MSG_RATE;j++) {
-			if (j==i && autoconfig && avrstatus>0 && avrstatus<5) spi_sendMsg(&status_msg); //query avr status for initialization purposes; 
-			else spi_sendMsg(&dummy_msg);
+			spi_sendMsg(&dummy_msg);
 		}
 /*
 		for (j=0;j<2;j++) {
@@ -727,6 +745,7 @@ int main(int argc, char **argv)
 	close(usock);
 
 	bcm2835_close();
-
+	
+	avrlog_close();
 }
 

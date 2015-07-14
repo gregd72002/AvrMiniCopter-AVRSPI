@@ -11,7 +11,7 @@ LDFLAGS=$(CC_OPTS)
 
 INSTALL=install
 
-OBJ_AVRSPI=avrspi.o routines.o spidev.o avrconfig.o mpu.o flightlog.o
+OBJ_AVRSPI=avrspi.o avrlog.o routines.o spidev.o avrconfig.o mpu.o flightlog.o
 OBJ_AVRSPI_CMD=avrspi_cmd.o routines.o
 
 %.o: %.c                                                                         
