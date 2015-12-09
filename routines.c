@@ -66,7 +66,7 @@ void unpack_lm(unsigned char *buf,struct local_msg *m) {
 	m->v = unpacki16(buf+2);
 }
 
-static unsigned int hardwareRevision(void)
+unsigned int hardwareRevision(void)
 {
    FILE * filp;
    unsigned rev;
