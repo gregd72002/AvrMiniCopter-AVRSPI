@@ -257,7 +257,7 @@ void reset_avr() {
 	bcm2835_delay(500);
 	bcm2835_gpio_write(RESET_PIN, HIGH);
 	bcm2835_delay(1000);
-	spi_reset();
+	if (spi) spi_reset();
 	
 	if (autoconfig) {
 		int ret = config_open(&config,CFG_PATH);
@@ -450,7 +450,7 @@ int main(int argc, char **argv)
 			case 'd': background = 1; verbose=0; break;
 			case 'p': portno = atoi(optarg);  break;
 			case 'v': verbose = atoi(optarg);  break;
-			case 'f': spi=0; break;
+			case 'f': spi=0; autoconfig=0; break;
 			case 'e': echo=1; break;
 			case 'u': strcpy(socket_path,optarg); break;
 			default:
