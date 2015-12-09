@@ -246,6 +246,7 @@ void set_reset_timeout(int ms) { //evaluated in avr init function
 
 
 void reset_avr() {
+	unsigned int rev = hardwareRevision();
 	reset_clients();
 	if (verbose) printf("Reset AVR\n");
 
@@ -254,7 +255,6 @@ void reset_avr() {
 	avr_spi_check = 0;
 	avr_obuf_c = 0;
 
-	unsigned int rev = hardwareRevision();
 	if (verbose) printf("Hardware revision: %u\n",rev);
 
 	if (rev==2) {
@@ -461,7 +461,7 @@ int main(int argc, char **argv)
 			case 'd': background = 1; verbose=0; break;
 			case 'p': portno = atoi(optarg);  break;
 			case 'v': verbose = atoi(optarg);  break;
-			case 'f': spi=0; break;
+			case 'f': spi=0; autoconfig=0; break;
 			case 'e': echo=1; break;
 			case 'u': strcpy(socket_path,optarg); break;
 			default:
