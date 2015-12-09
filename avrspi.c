@@ -253,10 +253,21 @@ void reset_avr() {
 	avrstatus = -1;
 	avr_spi_check = 0;
 	avr_obuf_c = 0;
-	bcm2835_gpio_write(RESET_PIN, LOW);
-	bcm2835_delay(500);
-	bcm2835_gpio_write(RESET_PIN, HIGH);
-	bcm2835_delay(1000);
+
+	unsigned int rev = hardwareRevision();
+	if (verbose) printf("Hardware revision: %u\n",rev);
+
+	if (rev==2) {
+		bcm2835_gpio_write(RPI_V2_GPIO_P1_22, LOW);
+		bcm2835_delay(500);
+		bcm2835_gpio_write(RPI_V2_GPIO_P1_22, HIGH);
+		bcm2835_delay(1000);
+	} else {
+		bcm2835_gpio_write(RPI_GPIO_P1_22, LOW);
+		bcm2835_delay(500);
+		bcm2835_gpio_write(RPI_GPIO_P1_22, HIGH);
+		bcm2835_delay(1000);
+	}
 	spi_reset();
 	
 	if (autoconfig) {

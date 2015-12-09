@@ -66,3 +66,32 @@ void unpack_lm(unsigned char *buf,struct local_msg *m) {
 	m->v = unpacki16(buf+2);
 }
 
+static unsigned int hardwareRevision(void)
+{
+   FILE * filp;
+   unsigned rev;
+   char buf[512];
+   char term;
+
+   rev = 0;
+
+   filp = fopen ("/proc/cpuinfo", "r");
+
+   if (filp != NULL)
+   {
+      while (fgets(buf, sizeof(buf), filp) != NULL)
+      {
+         if (!strncasecmp("revision\t", buf, 9))
+         {
+            if (sscanf(buf+strlen(buf)-5, "%x%c", &rev, &term) == 2)
+            {
+               if (term == '\n') break;
+               rev = 0;
+            }
+         }
+      }
+      fclose(filp);
+   }
+   return rev;
+}
+
