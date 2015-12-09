@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <bcm2835.h>
+#include <strings.h>
+#include <string.h>
 
 extern int verbose;
 
@@ -48,5 +50,7 @@ void unpack_lm(unsigned char *buf,struct local_msg *m);
 
 void local2avr(struct local_msg *lm, struct avr_msg *am);
 void avr2local(struct avr_msg *am, struct local_msg *lm);
+
+static unsigned int hardwareRevision(void);
 
 #endif
